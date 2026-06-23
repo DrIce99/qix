@@ -122,6 +122,7 @@ class BaseEnemy:
 # Si muove a caso. Se sbatte, cambia direzione.
 # ---------------------------------------------------------
 class RandomEnemy(BaseEnemy):
+    difficulty = 2
     type = "brandom"
     def get_direction(self, game):
         moves = self.get_valid_moves(game)
@@ -134,6 +135,7 @@ class RandomEnemy(BaseEnemy):
 # Scappa dal giocatore quando lui è fuori dai muri.
 # ---------------------------------------------------------
 class FleeEnemy(BaseEnemy):
+    difficulty = 1
     type = "fleeby"
     def get_direction(self, game):
         moves = self.get_valid_moves(game)
@@ -161,6 +163,7 @@ class FleeEnemy(BaseEnemy):
 # Ti insegue implacabilmente non appena esci dal muro.
 # ---------------------------------------------------------
 class ChaserEnemy(BaseEnemy):
+    difficulty = 4
     type = "chase"
     def get_direction(self, game):
         moves = self.get_valid_moves(game)
@@ -188,6 +191,7 @@ class ChaserEnemy(BaseEnemy):
 # per "tagliarti la strada".
 # ---------------------------------------------------------
 class CutterEnemy(BaseEnemy):
+    difficulty = 8
     type = "hasami"
     def get_direction(self, game):
         moves = self.get_valid_moves(game)
@@ -231,6 +235,68 @@ class CutterEnemy(BaseEnemy):
     #         # Cambia direzione casualmente
     #         self.dx, self.dy = random.choice([(0,1), (0,-1), (1,0), (-1,0)])
 
+class LevelManager:
+    def __init__(self):
+        self.current_level = 1
+        self.total_score = 0
+        
+        # Definiamo le classi e le loro soglie di sblocco
+        self.enemy_pool = [
+            (FleeEnemy, 1),    # Sbloccato dal livello 1
+            (RandomEnemy, 1),  # Sbloccato dal livello 1
+            (ChaserEnemy, 3),  # Sbloccato dal livello 3
+            (CutterEnemy, 6)   # Sbloccato dal livello 6
+        ]
+
+    def get_target_difficulty(self):
+        # La difficoltà target cresce linearmente. 
+        # Lvl 1 = 3, Lvl 2 = 4, Lvl 3 = 5, Lvl 6 = 8, ecc.
+        return self.current_level + 2 
+
+    def get_unlocked_enemies(self):
+        # Restituisce solo le classi dei nemici sbloccate per il livello attuale
+        return [cls for cls, unlock_lvl in self.enemy_pool if self.current_level >= unlock_lvl]
+
+    def generate_wave(self, game_grid, grid_w, grid_h):
+        """Genera la lista dei nemici per il livello corrente"""
+        target = self.get_target_difficulty()
+        unlocked = self.get_unlocked_enemies()
+        
+        wave = []
+        current_score = 0
+        
+        # Algoritmo greedy per raggiungere il target esatto (o quasi)
+        while current_score < target:
+            # Filtra i nemici che non farebbero "sforare" troppo il target
+            # Permettiamo uno sforzo massimo di +1 per evitare blocchi
+            valid_choices = [e for e in unlocked if current_score + e.difficulty <= target + 1]
+            
+            if not valid_choices:
+                # Fallback di sicurezza (non dovrebbe succedere con i nostri numeri)
+                valid_choices = [unlocked[0]] 
+                
+            chosen_class = random.choice(valid_choices)
+            wave.append(chosen_class)
+            current_score += chosen_class.difficulty
+
+        # Ora istanziamo i nemici in posizioni casuali valide (spazio EMPTY)
+        enemies = []
+        for enemy_class in wave:
+            x, y = self.find_valid_spawn(game_grid, grid_w, grid_h)
+            # Istanza con una leggera variazione di velocità per renderli unici
+            speed_var = random.randint(-1, 1) 
+            enemies.append(enemy_class(x, y, speed_delay=6 + speed_var))
+            
+        self.current_level += 1
+        return enemies
+
+    def find_valid_spawn(self, grid, grid_w, grid_h):
+        """Trova una cella EMPTY casuale per non far nascere i nemici nei muri"""
+        empty_cells = [(x, y) for y in range(grid_h) for x in range(grid_w) if grid[y][x] == 0] # 0 = EMPTY
+        if not empty_cells:
+            return grid_w // 2, grid_h // 2 # Fallback
+        return random.choice(empty_cells)
+
 class App:
     def __init__(self):
         pyxel.init(256, 256, title="Qix Clone - Conquista il Territorio")
@@ -240,12 +306,13 @@ class App:
         self.setup_borders()
         
         self.player = Player(GRID_W // 2, 0)
-        self.enemies = [
-            RandomEnemy(5, 5),
-            FleeEnemy(10, 10, speed_delay=8),   # Più lento per bilanciare
-            ChaserEnemy(20, 20, speed_delay=5), # Più veloce, è pericoloso!
-            CutterEnemy(15, 25)
-        ]
+        
+        # INIZIALIZZAZIONI CORRETTE QUI:
+        self.level_manager = LevelManager()
+        self.level_transition_timer = 0
+        
+        # Generiamo la prima ondata dal LevelManager invece di scriverla a mano
+        self.enemies = self.level_manager.generate_wave(self.grid, GRID_W, GRID_H)
         
         self.game_over = False
         self.game_won = False
@@ -331,7 +398,7 @@ class App:
         self.calculate_conquered()
 
         if self.conquered >= WIN_PERCENTAGE:
-            self.game_won = True
+            self.level_transition_timer = 60
 
     def check_collisions(self):
         # Controllo se un nemico tocca la scia o il giocatore (quando è fuori)
@@ -346,9 +413,15 @@ class App:
                     self.game_over = True
 
     def update(self):
-        if self.game_over or self.game_won:
-            if pyxel.btnp(pyxel.KEY_R):
-                pyxel.quit() # O reinizia il gioco resettando le variabili
+        if self.game_over:
+            if pyxel.btnp(pyxel.KEY_R): pyxel.quit()
+            return
+    
+        # Gestione transizione di livello
+        if self.level_transition_timer > 0:
+            self.level_transition_timer -= 1
+            if self.level_transition_timer == 0:
+                self.next_level()
             return
 
         self.player.update(self)
@@ -357,6 +430,23 @@ class App:
             
         self.check_collisions()
 
+    def next_level(self):
+        # 1. Resetta la griglia (lasciando solo i bordi)
+        self.grid = [[0 for _ in range(GRID_W)] for _ in range(GRID_H)]
+        self.setup_borders()
+        
+        # 2. Resetta il giocatore al centro/bordo
+        self.player.x = GRID_W // 2
+        self.player.y = 0
+        self.player.is_outside = False
+        self.player.trail = []
+        
+        # 3. Genera la nuova ondata di nemici (il LevelManager incrementa il livello internamente)
+        self.enemies = self.level_manager.generate_wave(self.grid, GRID_W, GRID_H)
+        
+        # 4. Resetta la percentuale di conquista
+        self.conquered = 0 
+    
     def draw(self):
         pyxel.cls(0) # Sfondo nero
 
@@ -381,15 +471,21 @@ class App:
                 if e.type == "brandom":
                     pyxel.rect(e.x * CELL_SIZE + 1, e.y * CELL_SIZE + 1, CELL_SIZE - 2, CELL_SIZE - 2, 14) # Viola
                 elif e.type == "fleeby":
-                    pyxel.rect(e.x * CELL_SIZE + 1, e.y * CELL_SIZE + 1, CELL_SIZE - 2, CELL_SIZE - 2, 15)
+                    pyxel.rect(e.x * CELL_SIZE + 1, e.y * CELL_SIZE + 1, CELL_SIZE - 2, CELL_SIZE - 2, 15) # Rosa/Bianco
                 elif e.type == "chase":
-                    pyxel.rect(e.x * CELL_SIZE + 1, e.y * CELL_SIZE + 1, CELL_SIZE - 2, CELL_SIZE - 2, 8)
-                # elif e.type == "hasami":
-                else:
-                    pyxel.rect(e.x * CELL_SIZE + 1, e.y * CELL_SIZE + 1, CELL_SIZE - 2, CELL_SIZE - 2, 4)
+                    pyxel.rect(e.x * CELL_SIZE + 1, e.y * CELL_SIZE + 1, CELL_SIZE - 2, CELL_SIZE - 2, 8)  # Rosso scuro
+                elif e.type == "hasami":
+                    pyxel.rect(e.x * CELL_SIZE + 1, e.y * CELL_SIZE + 1, CELL_SIZE - 2, CELL_SIZE - 2, 4)  # Marrone/Verdone
 
-        # UI: Percentuale di conquista
-        pyxel.text(2, 2, f"CONQUERED: {int(self.conquered * 100)}%", 7)
+        # UI: Livello e Percentuale di conquista (accorpati per non sovrapporsi)
+        current_display_lvl = self.level_manager.current_level - 1
+        pyxel.text(2, 2, f"LVL: {current_display_lvl}  CONQUERED: {int(self.conquered * 100)}%", 7)
+        
+        # Se è in transizione:
+        if self.level_transition_timer > 0:
+            if self.level_transition_timer % 10 < 5:
+                # Mostra il livello in arrivo
+                pyxel.text(100, 120, f"LEVEL {self.level_manager.current_level}!", 10)
         
         if self.game_over:
             pyxel.text(90, 120, "GAME OVER", 8)
