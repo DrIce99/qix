@@ -335,7 +335,7 @@ class App:
 
     def close_trail(self):
         # Se la scia è troppo corta, non ha creato un'area, la cancelliamo
-        if len(self.player.trail) < 2:
+        if len(self.player.trail) < 1:
             self.player.trail = []
             return
 
@@ -413,8 +413,10 @@ class App:
                     self.game_over = True
 
     def update(self):
-        if self.game_over:
-            if pyxel.btnp(pyxel.KEY_R): pyxel.quit()
+        # Sostituisci la gestione del game_over/game_won con questa:
+        if self.game_over or self.game_won:
+            if pyxel.btnp(pyxel.KEY_R):
+                self.reset_game()
             return
     
         # Gestione transizione di livello
@@ -429,6 +431,18 @@ class App:
             e.update(self)
             
         self.check_collisions()
+        
+    def reset_game(self):
+        """Ripristina lo stato iniziale del gioco senza chiudere l'applicazione"""
+        self.grid = [[EMPTY for _ in range(GRID_W)] for _ in range(GRID_H)]
+        self.setup_borders()
+        self.player = Player(GRID_W // 2, 0)
+        self.level_manager = LevelManager()
+        self.level_transition_timer = 0
+        self.enemies = self.level_manager.generate_wave(self.grid, GRID_W, GRID_H)
+        self.game_over = False
+        self.game_won = False
+        self.conquered = 0
 
     def next_level(self):
         # 1. Resetta la griglia (lasciando solo i bordi)
