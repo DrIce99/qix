@@ -473,11 +473,11 @@ class App:
                 elif cell == WALL:
                     pyxel.rect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE, 1) # Blu
                 elif cell == TRAIL:
-                    pyxel.rect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE, 2) # Rosso
+                    pyxel.rect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE, 3) # Verde scuro
 
         # Disegna il giocatore
         if not self.game_over:
-            pyxel.rect(self.player.x * CELL_SIZE, self.player.y * CELL_SIZE, CELL_SIZE, CELL_SIZE, 3) # Verde
+            pyxel.rect(self.player.x * CELL_SIZE, self.player.y * CELL_SIZE, CELL_SIZE, CELL_SIZE, 11) # Verde
 
         # Disegna i nemici
         for e in self.enemies:
