@@ -19,6 +19,8 @@ class Player:
         self.is_outside = False
         self.move_timer = 0
         self.move_delay = 4 # Velocità del giocatore
+        self.prev_dx = 0
+        self.prev_dy = 0
 
     def move(self, dx, dy, game):
         nx, ny = self.x + dx, self.y + dy
@@ -53,43 +55,181 @@ class Player:
             return
         self.move_timer = 0
 
-        dx, dy = 0, 0
-        if pyxel.btn(pyxel.KEY_UP) or pyxel.btn(pyxel.KEY_W): dy = -1
-        elif pyxel.btn(pyxel.KEY_DOWN) or pyxel.btn(pyxel.KEY_S): dy = 1
-        elif pyxel.btn(pyxel.KEY_LEFT) or pyxel.btn(pyxel.KEY_A): dx = -1
-        elif pyxel.btn(pyxel.KEY_RIGHT) or pyxel.btn(pyxel.KEY_D): dx = 1
+        dx = self.prev_dx
+        dy = self.prev_dy
+        if pyxel.btn(pyxel.KEY_UP) or pyxel.btn(pyxel.KEY_W): 
+            dy = -1
+            dx = 0
+        elif pyxel.btn(pyxel.KEY_DOWN) or pyxel.btn(pyxel.KEY_S): 
+            dy = 1
+            dx = 0
+        elif pyxel.btn(pyxel.KEY_LEFT) or pyxel.btn(pyxel.KEY_A): 
+            dx = -1
+            dy = 0
+        elif pyxel.btn(pyxel.KEY_RIGHT) or pyxel.btn(pyxel.KEY_D): 
+            dx = 1
+            dy = 0
+        self.prev_dx = dx
+        self.prev_dy = dy
+        
+        # if dx != 0 or dy != 0:
+        self.move(dx, dy, game)
 
-        if dx != 0 or dy != 0:
-            self.move(dx, dy, game)
+# Distanza di Manhattan (perfetta per le griglie)
+def manhattan_dist(x1, y1, x2, y2):
+    return abs(x1 - x2) + abs(y1 - y2)
 
-class Enemy:
-    def __init__(self, x, y):
+class BaseEnemy:
+    def __init__(self, x, y, speed_delay=6):
         self.x = x
         self.y = y
         self.alive = True
         self.move_timer = 0
-        self.move_delay = 6 # Leggermente più lenti del giocatore
-        self.dx, self.dy = random.choice([(0,1), (0,-1), (1,0), (-1,0)])
+        self.move_delay = speed_delay
+        self.dx, self.dy = 0, 0
+
+    def get_valid_moves(self, game):
+        """Restituisce le direzioni valide (che non siano muri o bordi)"""
+        moves = []
+        for dx, dy in [(0,1), (0,-1), (1,0), (-1,0)]:
+            nx, ny = self.x + dx, self.y + dy
+            if 0 <= nx < GRID_W and 0 <= ny < GRID_H:
+                if game.grid[ny][nx] != WALL:
+                    moves.append((dx, dy))
+        return moves
 
     def update(self, game):
-        if not self.alive:
-            return
+        if not self.alive: return
 
         self.move_timer += 1
-        if self.move_timer < self.move_delay:
-            return
+        if self.move_timer < self.move_delay: return
         self.move_timer = 0
 
-        # Semplice IA: va dritto, se sbatte cambia direzione
-        nx, ny = self.x + self.dx, self.y + self.dy
+        # 1. L'erede decide dove andare
+        self.dx, self.dy = self.get_direction(game)
         
-        # Controlla se può muoversi (deve stare solo su EMPTY o TRAIL)
-        # Se tocca il TRAIL mentre il giocatore è fuori, il giocatore muore (gestito nel game loop)
-        if 0 <= nx < GRID_W and 0 <= ny < GRID_H and game.grid[ny][nx] != WALL:
-            self.x, self.y = nx, ny
-        else:
-            # Cambia direzione casualmente
-            self.dx, self.dy = random.choice([(0,1), (0,-1), (1,0), (-1,0)])
+        # 2. Applicazione del movimento
+        self.x += self.dx
+        self.y += self.dy
+
+    def get_direction(self, game):
+        """Da sovrascrivere nelle classi figlie"""
+        return 0, 0
+
+
+# ---------------------------------------------------------
+# 1. IL VAGABONDO (Random)
+# Si muove a caso. Se sbatte, cambia direzione.
+# ---------------------------------------------------------
+class RandomEnemy(BaseEnemy):
+    type = "brandom"
+    def get_direction(self, game):
+        moves = self.get_valid_moves(game)
+        if not moves: return 0, 0
+        return random.choice(moves)
+
+
+# ---------------------------------------------------------
+# 2. IL CODARDO (Fleeer)
+# Scappa dal giocatore quando lui è fuori dai muri.
+# ---------------------------------------------------------
+class FleeEnemy(BaseEnemy):
+    type = "fleeby"
+    def get_direction(self, game):
+        moves = self.get_valid_moves(game)
+        if not moves: return 0, 0
+
+        if game.player.is_outside:
+            # Cerca la mossa che MASSIMIZZA la distanza dal giocatore
+            best_moves = []
+            max_dist = -1
+            for dx, dy in moves:
+                dist = manhattan_dist(self.x + dx, self.y + dy, game.player.x, game.player.y)
+                if dist > max_dist:
+                    max_dist = dist
+                    best_moves = [(dx, dy)]
+                elif dist == max_dist:
+                    best_moves.append((dx, dy))
+            return random.choice(best_moves)
+        
+        # Se il giocatore è al sicuro, si muove a caso
+        return random.choice(moves)
+
+
+# ---------------------------------------------------------
+# 3. L'INSEGUITORE (Chaser)
+# Ti insegue implacabilmente non appena esci dal muro.
+# ---------------------------------------------------------
+class ChaserEnemy(BaseEnemy):
+    type = "chase"
+    def get_direction(self, game):
+        moves = self.get_valid_moves(game)
+        if not moves: return 0, 0
+
+        if game.player.is_outside:
+            # Cerca la mossa che MINIMIZZA la distanza dal giocatore
+            best_moves = []
+            min_dist = float('inf')
+            for dx, dy in moves:
+                dist = manhattan_dist(self.x + dx, self.y + dy, game.player.x, game.player.y)
+                if dist < min_dist:
+                    min_dist = dist
+                    best_moves = [(dx, dy)]
+                elif dist == min_dist:
+                    best_moves.append((dx, dy))
+            return random.choice(best_moves)
+        
+        return random.choice(moves)
+
+
+# ---------------------------------------------------------
+# 4. IL TAGLIATORE (Cutter / Interceptor)
+# Cerca di raggiungere il punto più vicino della tua scia 
+# per "tagliarti la strada".
+# ---------------------------------------------------------
+class CutterEnemy(BaseEnemy):
+    type = "hasami"
+    def get_direction(self, game):
+        moves = self.get_valid_moves(game)
+        if not moves: return 0, 0
+
+        if game.player.is_outside and game.player.trail:
+            # Trova il punto della scia più vicino al nemico
+            target_x, target_y = min(game.player.trail, key=lambda p: manhattan_dist(self.x, self.y, p[0], p[1]))
+            
+            # Ora muoversi verso quel punto specifico della scia
+            best_moves = []
+            min_dist = float('inf')
+            for dx, dy in moves:
+                dist = manhattan_dist(self.x + dx, self.y + dy, target_x, target_y)
+                if dist < min_dist:
+                    min_dist = dist
+                    best_moves = [(dx, dy)]
+                elif dist == min_dist:
+                    best_moves.append((dx, dy))
+            return random.choice(best_moves)
+        
+        return random.choice(moves)
+
+    # def update(self, game):
+    #     if not self.alive:
+    #         return
+
+    #     self.move_timer += 1
+    #     if self.move_timer < self.move_delay:
+    #         return
+    #     self.move_timer = 0
+
+    #     # Semplice IA: va dritto, se sbatte cambia direzione
+    #     nx, ny = self.x + self.dx, self.y + self.dy
+        
+    #     # Controlla se può muoversi (deve stare solo su EMPTY o TRAIL)
+    #     # Se tocca il TRAIL mentre il giocatore è fuori, il giocatore muore (gestito nel game loop)
+    #     if 0 <= nx < GRID_W and 0 <= ny < GRID_H and game.grid[ny][nx] != WALL:
+    #         self.x, self.y = nx, ny
+    #     else:
+    #         # Cambia direzione casualmente
+    #         self.dx, self.dy = random.choice([(0,1), (0,-1), (1,0), (-1,0)])
 
 class App:
     def __init__(self):
@@ -100,7 +240,12 @@ class App:
         self.setup_borders()
         
         self.player = Player(GRID_W // 2, 0)
-        self.enemies = [Enemy(GRID_W // 4, GRID_H // 2), Enemy(GRID_W * 3 // 4, GRID_H // 2)]
+        self.enemies = [
+            RandomEnemy(5, 5),
+            FleeEnemy(10, 10, speed_delay=8),   # Più lento per bilanciare
+            ChaserEnemy(20, 20, speed_delay=5), # Più veloce, è pericoloso!
+            CutterEnemy(15, 25)
+        ]
         
         self.game_over = False
         self.game_won = False
@@ -233,7 +378,15 @@ class App:
         # Disegna i nemici
         for e in self.enemies:
             if e.alive:
-                pyxel.rect(e.x * CELL_SIZE + 1, e.y * CELL_SIZE + 1, CELL_SIZE - 2, CELL_SIZE - 2, 4) # Viola
+                if e.type == "brandom":
+                    pyxel.rect(e.x * CELL_SIZE + 1, e.y * CELL_SIZE + 1, CELL_SIZE - 2, CELL_SIZE - 2, 14) # Viola
+                elif e.type == "fleeby":
+                    pyxel.rect(e.x * CELL_SIZE + 1, e.y * CELL_SIZE + 1, CELL_SIZE - 2, CELL_SIZE - 2, 15)
+                elif e.type == "chase":
+                    pyxel.rect(e.x * CELL_SIZE + 1, e.y * CELL_SIZE + 1, CELL_SIZE - 2, CELL_SIZE - 2, 8)
+                # elif e.type == "hasami":
+                else:
+                    pyxel.rect(e.x * CELL_SIZE + 1, e.y * CELL_SIZE + 1, CELL_SIZE - 2, CELL_SIZE - 2, 4)
 
         # UI: Percentuale di conquista
         pyxel.text(2, 2, f"CONQUERED: {int(self.conquered * 100)}%", 7)
