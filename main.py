@@ -15,79 +15,138 @@ class Player:
     def __init__(self, x, y):
         self.x = x
         self.y = y
+        
+        self.px_x = x * CELL_SIZE
+        self.px_y = y * CELL_SIZE
+        
         self.trail = []
         self.is_outside = False
+        
+        self.is_moving = False
         self.move_timer = 0
-        self.move_delay = 4 # Velocità del giocatore
-        self.prev_dx = 0
-        self.prev_dy = 0
+        self.move_delay = 4  # Velocità di movimento (ripristinata a 4 per fluidità)
+        self.prev_x, self.prev_y = x, y
+        self.target_x, self.target_y = x, y
+        
+        # Direzione di movimento continua
+        self.current_dx = 0
+        self.current_dy = 0
+        
+        self.facing = 'DOWN'
+        self.draw_offset_x = 0
+        self.draw_offset_y = 0
 
-    def move(self, dx, dy, game):
+    def try_move(self, dx, dy, game):
+        """Tenta di iniziare un movimento verso una nuova cella"""
         nx, ny = self.x + dx, self.y + dy
         
-        # Controlla i limiti della mappa
         if not (0 <= nx < GRID_W and 0 <= ny < GRID_H):
-            return
+            return False
 
         target_cell = game.grid[ny][nx]
 
-        # Se il giocatore torna su un muro mentre sta disegnando, chiude il ciclo
+        # 1. Rientro nel muro: chiude la scia
         if target_cell == WALL and self.is_outside:
-            self.x, self.y = nx, ny
-            self.is_outside = False
-            game.close_trail()
-            return
+            self.target_x, self.target_y = nx, ny
+            self._start_animation()
+            game.close_trail_pending = (nx, ny)
+            return True
 
-        # Se esce dal muro, inizia a disegnare
+        # 2. Movimento nel vuoto: attiva lo stato is_outside per creare la scia
         if target_cell == EMPTY:
-            self.x, self.y = nx, ny
-            self.is_outside = True
-            self.trail.append((nx, ny))
-            game.grid[ny][nx] = TRAIL
-            
-        # Se si muove dentro i muri (safe zone)
-        elif target_cell == WALL and not self.is_outside:
-            self.x, self.y = nx, ny
+            self.target_x, self.target_y = nx, ny
+            self.is_outside = True  # <-- FIX: Ora rileva correttamente che siamo fuori
+            self._start_animation()
+            return True
+
+        # 3. Movimento sicuro all'interno dei muri
+        if target_cell == WALL and not self.is_outside:
+            self.target_x, self.target_y = nx, ny
+            self._start_animation()
+            return True
+
+        return False
+
+    def _start_animation(self):
+        """Prepara e avvia l'interpolazione"""
+        self.prev_x, self.prev_y = self.x, self.y
+        self.is_moving = True
+        self.move_timer = 0
+        
+        if self.target_x > self.prev_x: self.facing = 'RIGHT'
+        elif self.target_x < self.prev_x: self.facing = 'LEFT'
+        elif self.target_y > self.prev_y: self.facing = 'DOWN'
+        elif self.target_y < self.prev_y: self.facing = 'UP'
 
     def update(self, game):
-        self.move_timer += 1
-        if self.move_timer < self.move_delay:
-            return
-        self.move_timer = 0
+        # 1. Leggi l'input SEMPRE, anche durante l'animazione (Funziona da buffer!)
+        if pyxel.btn(pyxel.KEY_W) or pyxel.btn(pyxel.KEY_UP):    self.current_dx, self.current_dy = 0, -1
+        elif pyxel.btn(pyxel.KEY_S) or pyxel.btn(pyxel.KEY_DOWN):  self.current_dx, self.current_dy = 0, 1
+        elif pyxel.btn(pyxel.KEY_A) or pyxel.btn(pyxel.KEY_LEFT):  self.current_dx, self.current_dy = -1, 0
+        elif pyxel.btn(pyxel.KEY_D) or pyxel.btn(pyxel.KEY_RIGHT): self.current_dx, self.current_dy = 1, 0
 
-        dx = self.prev_dx
-        dy = self.prev_dy
-        if pyxel.btn(pyxel.KEY_UP) or pyxel.btn(pyxel.KEY_W): 
-            dy = -1
-            dx = 0
-        elif pyxel.btn(pyxel.KEY_DOWN) or pyxel.btn(pyxel.KEY_S): 
-            dy = 1
-            dx = 0
-        elif pyxel.btn(pyxel.KEY_LEFT) or pyxel.btn(pyxel.KEY_A): 
-            dx = -1
-            dy = 0
-        elif pyxel.btn(pyxel.KEY_RIGHT) or pyxel.btn(pyxel.KEY_D): 
-            dx = 1
-            dy = 0
-        self.prev_dx = dx
-        self.prev_dy = dy
-        
-        # if dx != 0 or dy != 0:
-        self.move(dx, dy, game)
+        # 2. Gestisci l'animazione in corso
+        if self.is_moving:
+            self.move_timer += 1
+            t = min(self.move_timer / self.move_delay, 1.0)
+            
+            self.px_x = lerp(self.prev_x, self.target_x, t) * CELL_SIZE
+            self.px_y = lerp(self.prev_y, self.target_y, t) * CELL_SIZE
+
+            # Se l'animazione è finita, aggiorna la griglia e togli il blocco
+            if self.move_timer >= self.move_delay:
+                self.x, self.y = self.target_x, self.target_y
+                self.is_moving = False
+                
+                if self.is_outside:
+                    self.trail.append((self.x, self.y))
+                    game.grid[self.y][self.x] = TRAIL
+                
+                if hasattr(game, 'close_trail_pending') and game.close_trail_pending:
+                    game.close_trail()
+                    game.close_trail_pending = None
+                    self.is_outside = False
+            else:
+                # Se sta ancora interpolando, esci e non calcolare nuovi movimenti
+                return
+
+        # 3. Se non si sta muovendo (o ha appena finito), esegui il prossimo passo
+        if self.current_dx != 0 or self.current_dy != 0:
+            moved = self.try_move(self.current_dx, self.current_dy, game)
+            if not moved:
+                self.current_dx, self.current_dy = 0, 0
 
 # Distanza di Manhattan (perfetta per le griglie)
 def manhattan_dist(x1, y1, x2, y2):
     return abs(x1 - x2) + abs(y1 - y2)
 
-class BaseEnemy:
+def lerp(a, b, t):
+    """Interpolazione lineare tra a e b basata sul tempo t (da 0.0 a 1.0)"""
+    return a + (b - a) * t
+
+class BaseEnemy:    
     def __init__(self, x, y, speed_delay=6):
+        # Posizione Logica
         self.x = x
         self.y = y
+        
+        # Posizione Visiva
+        self.px_x = x * CELL_SIZE
+        self.px_y = y * CELL_SIZE
+        
         self.alive = True
+        self.is_moving = False
         self.move_timer = 0
         self.move_delay = speed_delay
-        self.dx, self.dy = 0, 0
-
+        
+        self.prev_x, self.prev_y = x, y
+        self.target_x, self.target_y = x, y
+        
+        # --- SPRITE READY ---
+        self.facing = 'DOWN'
+        self.draw_offset_x = 0
+        self.draw_offset_y = 0
+    
     def get_valid_moves(self, game):
         """Restituisce le direzioni valide (che non siano muri o bordi)"""
         moves = []
@@ -98,24 +157,48 @@ class BaseEnemy:
                     moves.append((dx, dy))
         return moves
 
+    def _start_animation(self, tx, ty):
+        self.prev_x, self.prev_y = self.x, self.y
+        self.target_x, self.target_y = tx, ty
+        self.is_moving = True
+        self.move_timer = 0
+        
+        if tx > self.prev_x: self.facing = 'RIGHT'
+        elif tx < self.prev_x: self.facing = 'LEFT'
+        elif ty > self.prev_y: self.facing = 'DOWN'
+        elif ty < self.prev_y: self.facing = 'UP'
+
     def update(self, game):
         if not self.alive: return
 
-        self.move_timer += 1
-        if self.move_timer < self.move_delay: return
-        self.move_timer = 0
+        if self.is_moving:
+            # Interpolazione visiva
+            self.move_timer += 1
+            t = min(self.move_timer / self.move_delay, 1.0)
+            
+            self.px_x = lerp(self.prev_x, self.target_x, t) * CELL_SIZE
+            self.px_y = lerp(self.prev_y, self.target_y, t) * CELL_SIZE
 
-        # 1. L'erede decide dove andare
-        self.dx, self.dy = self.get_direction(game)
+            if self.move_timer >= self.move_delay:
+                self.x, self.y = self.target_x, self.target_y
+                self.is_moving = False
+            return
+
+        # Se è fermo (ha raggiunto la cella), l'IA decide la prossima mossa
+        dx, dy = self.get_direction(game)
         
-        # 2. Applicazione del movimento
-        self.x += self.dx
-        self.y += self.dy
+        if dx != 0 or dy != 0:
+            nx, ny = self.x + dx, self.y + dy
+            # Controlla che sia una mossa valida prima di animarla
+            if 0 <= nx < GRID_W and 0 <= ny < GRID_H and game.grid[ny][nx] != WALL:
+                self._start_animation(nx, ny)
+            else:
+                # Se l'IA ha scelto un muro (es. è in trappola), la forziamo a stare ferma 
+                # o a cambiare direzione nel prossimo frame (dipende da come implementi get_direction)
+                pass
 
     def get_direction(self, game):
-        """Da sovrascrivere nelle classi figlie"""
-        return 0, 0
-
+        return 0, 0 # Sovrascritto dalle classi figlie
 
 # ---------------------------------------------------------
 # 1. IL VAGABONDO (Random)
@@ -214,26 +297,6 @@ class CutterEnemy(BaseEnemy):
             return random.choice(best_moves)
         
         return random.choice(moves)
-
-    # def update(self, game):
-    #     if not self.alive:
-    #         return
-
-    #     self.move_timer += 1
-    #     if self.move_timer < self.move_delay:
-    #         return
-    #     self.move_timer = 0
-
-    #     # Semplice IA: va dritto, se sbatte cambia direzione
-    #     nx, ny = self.x + self.dx, self.y + self.dy
-        
-    #     # Controlla se può muoversi (deve stare solo su EMPTY o TRAIL)
-    #     # Se tocca il TRAIL mentre il giocatore è fuori, il giocatore muore (gestito nel game loop)
-    #     if 0 <= nx < GRID_W and 0 <= ny < GRID_H and game.grid[ny][nx] != WALL:
-    #         self.x, self.y = nx, ny
-    #     else:
-    #         # Cambia direzione casualmente
-    #         self.dx, self.dy = random.choice([(0,1), (0,-1), (1,0), (-1,0)])
 
 class LevelManager:
     def __init__(self):
@@ -477,19 +540,25 @@ class App:
 
         # Disegna il giocatore
         if not self.game_over:
-            pyxel.rect(self.player.x * CELL_SIZE, self.player.y * CELL_SIZE, CELL_SIZE, CELL_SIZE, 11) # Verde
+            # Quando passerò agli sprite, basterà cambiare pyxel.rect con pyxel.blt
+            # e usare self.player.facing per scegliere l'immagine
+            draw_x = self.player.px_x + self.player.draw_offset_x
+            draw_y = self.player.px_y + self.player.draw_offset_y
+            pyxel.rect(draw_x, draw_y, CELL_SIZE, CELL_SIZE, 11) 
 
         # Disegna i nemici
         for e in self.enemies:
             if e.alive:
+                draw_x = e.px_x + e.draw_offset_x
+                draw_y = e.px_y + e.draw_offset_y
                 if e.type == "brandom":
-                    pyxel.rect(e.x * CELL_SIZE + 1, e.y * CELL_SIZE + 1, CELL_SIZE - 2, CELL_SIZE - 2, 14) # Viola
+                    pyxel.rect(draw_x, draw_y, CELL_SIZE, CELL_SIZE, 14) # Viola
                 elif e.type == "fleeby":
-                    pyxel.rect(e.x * CELL_SIZE + 1, e.y * CELL_SIZE + 1, CELL_SIZE - 2, CELL_SIZE - 2, 15) # Rosa/Bianco
+                    pyxel.rect(draw_x, draw_y, CELL_SIZE, CELL_SIZE, 15) # Rosa/Bianco
                 elif e.type == "chase":
-                    pyxel.rect(e.x * CELL_SIZE + 1, e.y * CELL_SIZE + 1, CELL_SIZE - 2, CELL_SIZE - 2, 8)  # Rosso scuro
+                    pyxel.rect(draw_x, draw_y, CELL_SIZE, CELL_SIZE, 8)  # Rosso scuro
                 elif e.type == "hasami":
-                    pyxel.rect(e.x * CELL_SIZE + 1, e.y * CELL_SIZE + 1, CELL_SIZE - 2, CELL_SIZE - 2, 4)  # Marrone/Verdone
+                    pyxel.rect(draw_x, draw_y, CELL_SIZE, CELL_SIZE, 4)  # Marrone/Verdone
 
         # UI: Livello e Percentuale di conquista (accorpati per non sovrapporsi)
         current_display_lvl = self.level_manager.current_level - 1
