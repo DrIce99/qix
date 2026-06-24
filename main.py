@@ -500,6 +500,10 @@ class App:
             if self.game_over or self.game_won:
                 if pyxel.btnp(pyxel.KEY_R):
                     self.reset_game()
+                
+                if pyxel.btnp(pyxel.KEY_M) or pyxel.btnp(pyxel.KEY_ESCAPE):
+                    self.menu.state = STATE_MAIN_MENU
+                    self.game_started = False
                 return
         
             # Gestione transizione di livello
@@ -530,6 +534,7 @@ class App:
         self.game_over = False
         self.game_won = False
         self.conquered = 0
+        self.options.reset_unlocks() 
 
     def next_level(self):
         # 1. Resetta la griglia (lasciando solo i bordi)
@@ -544,6 +549,9 @@ class App:
         
         # 3. Genera la nuova ondata di nemici (il LevelManager incrementa il livello internamente)
         self.enemies = self.level_manager.generate_wave(self.grid, GRID_W, GRID_H)
+        
+        display_lvl = self.level_manager.current_level - 1 
+        self.options.update_unlocks(display_lvl)
         
         # 4. Resetta la percentuale di conquista
         self.conquered = 0 
@@ -597,10 +605,10 @@ class App:
             
             if self.game_over:
                 pyxel.text(90, 120, "GAME OVER", 8)
-                pyxel.text(80, 135, "Press R to quit", 7)
+                pyxel.text(65, 135, "R: RESTART   M: MENU", 7)
             elif self.game_won:
                 pyxel.text(95, 120, "YOU WIN!", 10)
-                pyxel.text(80, 135, "Press R to quit", 7)
+                pyxel.text(65, 135, "R: RESTART   M: MENU", 7)
         else:
             # Disegna i menu
             self.menu.draw()
@@ -697,6 +705,26 @@ class OptionsManager:
             if not unlocks[i]:
                 unlocks[i] = True
                 return i # Ritorna l'indice appena sbloccato
+    
+    def reset_unlocks(self):
+        """Resetta gli sblocchi al livello iniziale (solo la prima palette sbloccata)"""
+        # Crea una lista con True solo al primo elemento e False per tutti gli altri
+        self.unlocked_player = [True] + [False] * (len(self.player_palettes) - 1)
+        self.unlocked_game = [True] + [False] * (len(self.game_palettes) - 1)
+        self.unlocked_enemy = [True] + [False] * (len(self.enemy_palettes) - 1)
+
+    def update_unlocks(self, current_display_level):
+        """Sblocca le palette in base al livello raggiunto (ogni 5 livelli)"""
+        # Calcola quante palette aggiuntive devono essere sbloccate
+        # Lvl 5 -> 1, Lvl 10 -> 2, Lvl 15 -> 3, ecc.
+        additional_unlocks = current_display_level // 5
+        
+        # Sblocca fino all'indice calcolato (senza superare il massimo disponibile)
+        max_idx = len(self.unlocked_player)
+        for i in range(1, min(additional_unlocks + 1, max_idx)):
+            self.unlocked_player[i] = True
+            self.unlocked_game[i] = True
+            self.unlocked_enemy[i] = True
 
 class MenuManager:
     def __init__(self, options):
