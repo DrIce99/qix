@@ -370,6 +370,9 @@ class App:
     def __init__(self):
         pyxel.init(256, 256, title="Qix Clone - Conquista il Territorio")
         
+        pyxel.load("res.pyxres")
+        pyxel.playm(1, loop=True)
+
         # 0: Nero, 1: Blu (Muri), 2: Rosso (Scia), 3: Verde (Player), 4: Viola (Nemici), 5: Bianco (Vuoto)
         self.grid = [[EMPTY for _ in range(GRID_W)] for _ in range(GRID_H)]
         self.setup_borders()
