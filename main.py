@@ -11,6 +11,12 @@ EMPTY = 0
 WALL = 1
 TRAIL = 2
 
+# Costanti di Stato
+STATE_MAIN_MENU = 0
+STATE_PLAY_MENU = 1
+STATE_OPTIONS_MENU = 2
+STATE_PLAYING = 3
+
 class Player:
     def __init__(self, x, y):
         self.x = x
@@ -381,6 +387,13 @@ class App:
         self.game_won = False
         self.conquered = 0
         
+        # Inizializza i gestori
+        self.options = OptionsManager()
+        self.menu = MenuManager(self.options)
+
+        # Il gioco non parte subito, inizia dal menu
+        self.game_started = False 
+        
         pyxel.run(self.update, self.draw)
 
     def setup_borders(self):
@@ -475,25 +488,36 @@ class App:
                 if (e.x, e.y) in self.player.trail:
                     self.game_over = True
 
-    def update(self):
-        # Sostituisci la gestione del game_over/game_won con questa:
-        if self.game_over or self.game_won:
-            if pyxel.btnp(pyxel.KEY_R):
-                self.reset_game()
-            return
-    
-        # Gestione transizione di livello
-        if self.level_transition_timer > 0:
-            self.level_transition_timer -= 1
-            if self.level_transition_timer == 0:
-                self.next_level()
-            return
+    def start_new_game(self):
+        self.reset_game()
 
-        self.player.update(self)
-        for e in self.enemies:
-            e.update(self)
-            
-        self.check_collisions()
+    def update(self):
+        if self.menu.state == STATE_PLAYING:
+            if not self.game_started:
+                self.start_new_game() # Il tuo metodo di setup iniziale
+                self.game_started = True
+                
+            if self.game_over or self.game_won:
+                if pyxel.btnp(pyxel.KEY_R):
+                    self.reset_game()
+                return
+        
+            # Gestione transizione di livello
+            if self.level_transition_timer > 0:
+                self.level_transition_timer -= 1
+                if self.level_transition_timer == 0:
+                    self.next_level()
+                return
+
+            self.player.update(self)
+            for e in self.enemies:
+                e.update(self)
+                
+            self.check_collisions()
+        else:
+            # Se siamo in un menu, il gioco è in pausa
+            self.game_started = False
+            self.menu.update()
         
     def reset_game(self):
         """Ripristina lo stato iniziale del gioco senza chiudere l'applicazione"""
@@ -525,56 +549,312 @@ class App:
         self.conquered = 0 
     
     def draw(self):
-        pyxel.cls(0) # Sfondo nero
+        if self.menu.state == STATE_PLAYING:
+            pyxel.cls(0) # Sfondo nero
 
-        # Disegna la griglia
-        for y in range(GRID_H):
-            for x in range(GRID_W):
-                cell = self.grid[y][x]
-                if cell == EMPTY:
-                    pyxel.rect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE, 5) # Bianco
-                elif cell == WALL:
-                    pyxel.rect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE, 1) # Blu
-                elif cell == TRAIL:
-                    pyxel.rect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE, 3) # Verde scuro
+            # Disegna la griglia
+            for y in range(GRID_H):
+                for x in range(GRID_W):
+                    cell = self.grid[y][x]
+                    if cell == EMPTY:
+                        pyxel.rect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE, 5) # Bianco
+                    elif cell == WALL:
+                        pyxel.rect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE, 1) # Blu
+                    elif cell == TRAIL:
+                        pyxel.rect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE, 3) # Verde scuro
 
-        # Disegna il giocatore
-        if not self.game_over:
-            # Quando passerò agli sprite, basterà cambiare pyxel.rect con pyxel.blt
-            # e usare self.player.facing per scegliere l'immagine
-            draw_x = self.player.px_x + self.player.draw_offset_x
-            draw_y = self.player.px_y + self.player.draw_offset_y
-            pyxel.rect(draw_x, draw_y, CELL_SIZE, CELL_SIZE, 11) 
+            # Disegna il giocatore
+            if not self.game_over:
+                # Quando passerò agli sprite, basterà cambiare pyxel.rect con pyxel.blt
+                # e usare self.player.facing per scegliere l'immagine
+                draw_x = self.player.px_x + self.player.draw_offset_x
+                draw_y = self.player.px_y + self.player.draw_offset_y
+                pyxel.rect(draw_x, draw_y, CELL_SIZE, CELL_SIZE, 11) 
 
-        # Disegna i nemici
-        for e in self.enemies:
-            if e.alive:
-                draw_x = e.px_x + e.draw_offset_x
-                draw_y = e.px_y + e.draw_offset_y
-                if e.type == "brandom":
-                    pyxel.rect(draw_x, draw_y, CELL_SIZE, CELL_SIZE, 14) # Viola
-                elif e.type == "fleeby":
-                    pyxel.rect(draw_x, draw_y, CELL_SIZE, CELL_SIZE, 15) # Rosa/Bianco
-                elif e.type == "chase":
-                    pyxel.rect(draw_x, draw_y, CELL_SIZE, CELL_SIZE, 8)  # Rosso scuro
-                elif e.type == "hasami":
-                    pyxel.rect(draw_x, draw_y, CELL_SIZE, CELL_SIZE, 4)  # Marrone/Verdone
+            # Disegna i nemici
+            for e in self.enemies:
+                if e.alive:
+                    draw_x = e.px_x + e.draw_offset_x
+                    draw_y = e.px_y + e.draw_offset_y
+                    if e.type == "brandom":
+                        pyxel.rect(draw_x, draw_y, CELL_SIZE, CELL_SIZE, 14) # Viola
+                    elif e.type == "fleeby":
+                        pyxel.rect(draw_x, draw_y, CELL_SIZE, CELL_SIZE, 15) # Rosa/Bianco
+                    elif e.type == "chase":
+                        pyxel.rect(draw_x, draw_y, CELL_SIZE, CELL_SIZE, 8)  # Rosso scuro
+                    elif e.type == "hasami":
+                        pyxel.rect(draw_x, draw_y, CELL_SIZE, CELL_SIZE, 4)  # Marrone/Verdone
 
-        # UI: Livello e Percentuale di conquista (accorpati per non sovrapporsi)
-        current_display_lvl = self.level_manager.current_level - 1
-        pyxel.text(2, 2, f"LVL: {current_display_lvl}  CONQUERED: {int(self.conquered * 100)}%", 7)
+            # UI: Livello e Percentuale di conquista (accorpati per non sovrapporsi)
+            current_display_lvl = self.level_manager.current_level - 1
+            pyxel.text(2, 2, f"LVL: {current_display_lvl}  CONQUERED: {int(self.conquered * 100)}%", 7)
+            
+            # Se è in transizione:
+            if self.level_transition_timer > 0:
+                if self.level_transition_timer % 10 < 5:
+                    # Mostra il livello in arrivo
+                    pyxel.text(100, 120, f"LEVEL {self.level_manager.current_level}!", 10)
+            
+            if self.game_over:
+                pyxel.text(90, 120, "GAME OVER", 8)
+                pyxel.text(80, 135, "Press R to quit", 7)
+            elif self.game_won:
+                pyxel.text(95, 120, "YOU WIN!", 10)
+                pyxel.text(80, 135, "Press R to quit", 7)
+        else:
+            # Disegna i menu
+            self.menu.draw()
+
+# Interfaccia principale 
+
+class OptionsManager:
+    def __init__(self):
+        # --- IMPOSTAZIONI GENERALI ---
+        self.volume = 5  # Da 0 a 7 (standard Pyxel) o 0-100
+        self.skin_index = 0
+        self.max_skins = 1  # Diventerà 2 quando aggiungerai gli sprite
+
+        # --- DEFINIZIONE PALETTE (Coppie di colori Pyxel 0-15) ---
+        # Formato: (Colore Principale, Colore Secondario)
+        self.player_palettes = [
+            (11, 3),   # Base: Verde / Verde scuro
+            (2, 4),  
+            (10, 9),  
+            (14, 8),  
+            (5, 1),  
+            (6, 12),  
+            (15, 13),  
+            (7, 0)  
+        ]
+        self.game_palettes = [
+            (10, 9),  
+            (14, 8),  
+            (5, 1),  
+            (6, 12),  
+            (15, 13),  
+            (7, 0), 
+            (11, 3), 
+            (2, 4) 
+        ]
+        self.enemy_palettes = [
+            (2, 4),  
+            (10, 9),  
+            (14, 8),  
+            (5, 1),  
+            (6, 12),  
+            (15, 13),  
+            (7, 0),
+            (11, 3)  
+        ]
+
+        # --- SELEZIONI ATTUALI (Indici) ---
+        self.sel_player_pal = 0
+        self.sel_game_pal = 0
+        self.sel_enemy_pal = 0
+
+        # --- STATO SBLOCCHI (True/False) ---
+        self.unlocked_player = [True, False, False, False, False, False, False, False]
+        self.unlocked_game = [True, False, False, False, False, False, False, False]
+        self.unlocked_enemy = [True, False, False, False, False, False, False, False]
+
+    def get_colors(self):
+        """Restituisce tutti i colori attivi per il rendering"""
+        p_col = self.player_palettes[self.sel_player_pal]
+        g_col = self.game_palettes[self.sel_game_pal]
+        e_col = self.enemy_palettes[self.sel_enemy_pal]
         
-        # Se è in transizione:
-        if self.level_transition_timer > 0:
-            if self.level_transition_timer % 10 < 5:
-                # Mostra il livello in arrivo
-                pyxel.text(100, 120, f"LEVEL {self.level_manager.current_level}!", 10)
+        return {
+            'player': p_col[0], 'trail': p_col[1],
+            'bg': g_col[0], 'wall': g_col[1],
+            'enemy_group1': e_col[0], 'enemy_group2': e_col[1]
+        }
+
+    def can_select_palette(self, target_type, new_index):
+        """
+        Logica Anti-Mimesi: Impedisce di selezionare palette 
+        che hanno lo stesso colore principale delle altre due categorie.
+        """
+        # Ottieni il colore principale della nuova selezione
+        if target_type == 'player': new_col = self.player_palettes[new_index][0]
+        elif target_type == 'game': new_col = self.game_palettes[new_index][0]
+        else: new_col = self.enemy_palettes[new_index][0]
+
+        # Controlla se è uguale al colore principale delle altre due
+        other_cols = []
+        if target_type != 'player': other_cols.append(self.player_palettes[self.sel_player_pal][0])
+        if target_type != 'game': other_cols.append(self.game_palettes[self.sel_game_pal][0])
+        if target_type != 'enemy': other_cols.append(self.enemy_palettes[self.sel_enemy_pal][0])
+
+        return new_col not in other_cols
+
+    def unlock_next_palette(self, target_type):
+        """Chiamato quando il giocatore supera un livello milestone"""
+        if target_type == 'player': unlocks = self.unlocked_player
+        elif target_type == 'game': unlocks = self.unlocked_game
+        else: unlocks = self.unlocked_enemy
+
+        for i in range(len(unlocks)):
+            if not unlocks[i]:
+                unlocks[i] = True
+                return i # Ritorna l'indice appena sbloccato
+
+class MenuManager:
+    def __init__(self, options):
+        self.options = options
+        self.state = STATE_MAIN_MENU
         
-        if self.game_over:
-            pyxel.text(90, 120, "GAME OVER", 8)
-            pyxel.text(80, 135, "Press R to quit", 7)
-        elif self.game_won:
-            pyxel.text(95, 120, "YOU WIN!", 10)
-            pyxel.text(80, 135, "Press R to quit", 7)
+        # Indici di selezione per i menu
+        self.main_sel = 0
+        self.play_sel = 0
+        self.opt_sel = 0
+        
+        # Definizione voci menu opzioni
+        self.opt_items = [
+            {"name": "VOLUME", "type": "slider"},
+            {"name": "SKIN", "type": "selector"},
+            {"name": "PALETTE PLAYER", "type": "palette", "target": "player"},
+            {"name": "PALETTE MONDO", "type": "palette", "target": "game"},
+            {"name": "PALETTE NEMICI", "type": "palette", "target": "enemy"},
+            {"name": "INDIETRO", "type": "action"}
+        ]
+
+    def update(self):
+        # Input di navigazione base (cambio voce)
+        if pyxel.btnp(pyxel.KEY_UP): self._change_selection(-1)
+        if pyxel.btnp(pyxel.KEY_DOWN): self._change_selection(1)
+
+        # Input di conferma/indietro
+        if pyxel.btnp(pyxel.KEY_Z) or pyxel.btnp(pyxel.KEY_RETURN):
+            self._confirm()
+        if pyxel.btnp(pyxel.KEY_X) or pyxel.btnp(pyxel.KEY_ESCAPE):
+            self._go_back()
+
+        # Input laterale (Sinistra/Destra) per modificare i valori nelle Opzioni
+        if self.state == STATE_OPTIONS_MENU:
+            if pyxel.btnp(pyxel.KEY_LEFT): self._adjust_value(-1)
+            if pyxel.btnp(pyxel.KEY_RIGHT): self._adjust_value(1)
+
+    def _change_selection(self, direction):
+        if self.state == STATE_MAIN_MENU:
+            self.main_sel = (self.main_sel + direction) % 3
+        elif self.state == STATE_PLAY_MENU:
+            self.play_sel = (self.play_sel + direction) % 2
+        elif self.state == STATE_OPTIONS_MENU:
+            self.opt_sel = (self.opt_sel + direction) % len(self.opt_items)
+
+    def _confirm(self):
+        if self.state == STATE_MAIN_MENU:
+            if self.main_sel == 0: self.state = STATE_PLAY_MENU
+            elif self.main_sel == 1: self.state = STATE_OPTIONS_MENU
+            elif self.main_sel == 2: pyxel.quit()
+            
+        elif self.state == STATE_PLAY_MENU:
+            if self.play_sel == 0: 
+                self.state = STATE_PLAYING
+                # Qui dovrai chiamare il metodo per inizializzare una nuova partita
+            # play_sel == 1 è "Continua" ed è disabilitato, quindi non fa nulla
+            
+        elif self.state == STATE_OPTIONS_MENU:
+            item = self.opt_items[self.opt_sel]
+            if item["type"] == "action": # INDIETRO
+                self.state = STATE_MAIN_MENU
+
+    def _go_back(self):
+        if self.state == STATE_PLAY_MENU: self.state = STATE_MAIN_MENU
+        elif self.state == STATE_OPTIONS_MENU: self.state = STATE_MAIN_MENU
+        elif self.state == STATE_PLAYING: 
+            # Pausa o torna al menu? Per ora torniamo al menu principale
+            self.state = STATE_MAIN_MENU 
+
+    def _adjust_value(self, direction):
+        item = self.opt_items[self.opt_sel]
+        
+        if item["type"] == "slider":
+            self.options.volume = max(0, min(7, self.options.volume + direction))
+            
+        elif item["type"] == "selector":
+            self.options.skin_index = (self.options.skin_index + direction) % self.options.max_skins
+            
+        elif item["type"] == "palette":
+            target = item["target"]
+            if target == 'player': pals, sel, unl = self.options.player_palettes, 'sel_player_pal', self.options.unlocked_player
+            elif target == 'game': pals, sel, unl = self.options.game_palettes, 'sel_game_pal', self.options.unlocked_game
+            else: pals, sel, unl = self.options.enemy_palettes, 'sel_enemy_pal', self.options.unlocked_enemy
+
+            current_idx = getattr(self.options, sel)
+            new_idx = (current_idx + direction) % len(pals)
+            
+            # Controlla se è sbloccato
+            if not unl[new_idx]: return 
+            
+            # Controlla la logica anti-mimesi
+            if self.options.can_select_palette(target, new_idx):
+                setattr(self.options, sel, new_idx)
+
+    def draw(self):
+        if self.state == STATE_MAIN_MENU: self._draw_main()
+        elif self.state == STATE_PLAY_MENU: self._draw_play()
+        elif self.state == STATE_OPTIONS_MENU: self._draw_options()
+
+    def _draw_main(self):
+        pyxel.cls(0)
+        pyxel.text(100, 40, "QIX CLONE", 7)
+        items = ["GIOCA", "OPZIONI", "ESCI"]
+        for i, text in enumerate(items):
+            col = 7 if i == self.main_sel else 5
+            pyxel.text(110, 80 + i * 20, text, col)
+            if i == self.main_sel: pyxel.text(100, 80 + i * 20, ">", 7)
+
+    def _draw_play(self):
+        pyxel.cls(0)
+        pyxel.text(100, 40, "GIOCA", 7)
+        items = ["NUOVA PARTITA", "CONTINUA"]
+        for i, text in enumerate(items):
+            # "Continua" è disabilitato (colore 5 e non selezionabile visivamente in modo attivo)
+            col = 7 if i == self.play_sel else 5
+            if i == 1: col = 5 # Sempre grigio per disabilitato
+            pyxel.text(90, 80 + i * 20, text, col)
+            if i == self.play_sel and i == 0: pyxel.text(80, 80 + i * 20, ">", 7)
+
+    def _draw_options(self):
+        pyxel.cls(0)
+        pyxel.text(90, 10, "OPZIONI", 7)
+        
+        for i, item in enumerate(self.opt_items):
+            y = 40 + i * 25
+            col = 7 if i == self.opt_sel else 5
+            pyxel.text(20, y, item["name"], col)
+            if i == self.opt_sel: pyxel.text(10, y, ">", 7)
+
+            # Disegna i controlli a destra
+            val_x = 150
+            if item["type"] == "slider":
+                pyxel.text(val_x, y, f"< {self.options.volume} >", 7)
+            elif item["type"] == "selector":
+                pyxel.text(val_x, y, f"< SKIN {self.options.skin_index+1} >", 7)
+                # Qui potresti disegnare l'anteprima dello sprite/quadrato al centro
+            elif item["type"] == "palette":
+                self._draw_palette_preview(item["target"], val_x, y, i == self.opt_sel)
+
+    def _draw_palette_preview(self, target, x, y, is_selected):
+        if target == 'player': pals, sel, unl = self.options.player_palettes, self.options.sel_player_pal, self.options.unlocked_player
+        elif target == 'game': pals, sel, unl = self.options.game_palettes, self.options.sel_game_pal, self.options.unlocked_game
+        else: pals, sel, unl = self.options.enemy_palettes, self.options.sel_enemy_pal, self.options.unlocked_enemy
+
+        idx = sel
+        is_unlocked = unl[idx]
+        
+        if not is_unlocked:
+            pyxel.text(x, y, "[ BLOCCATO ]", 5)
+            return
+
+        c1, c2 = pals[idx]
+        # Disegna i due quadratini colorati come anteprima
+        pyxel.rect(x, y, 6, 6, c1)
+        pyxel.rect(x + 10, y, 6, 6, c2)
+        
+        if is_selected:
+            pyxel.text(x - 10, y, "<", 7)
+            pyxel.text(x + 20, y, ">", 7)
 
 App()
