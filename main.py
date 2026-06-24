@@ -558,18 +558,19 @@ class App:
     
     def draw(self):
         if self.menu.state == STATE_PLAYING:
-            pyxel.cls(0) # Sfondo nero
+            colors = self.options.get_colors()
+            pyxel.cls(colors['bg']) 
 
             # Disegna la griglia
             for y in range(GRID_H):
                 for x in range(GRID_W):
                     cell = self.grid[y][x]
                     if cell == EMPTY:
-                        pyxel.rect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE, 5) # Bianco
+                        pyxel.rect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE, colors['bg']) 
                     elif cell == WALL:
-                        pyxel.rect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE, 1) # Blu
+                        pyxel.rect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE, colors['wall']) 
                     elif cell == TRAIL:
-                        pyxel.rect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE, 3) # Verde scuro
+                        pyxel.rect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE, colors['trail']) 
 
             # Disegna il giocatore
             if not self.game_over:
@@ -577,7 +578,7 @@ class App:
                 # e usare self.player.facing per scegliere l'immagine
                 draw_x = self.player.px_x + self.player.draw_offset_x
                 draw_y = self.player.px_y + self.player.draw_offset_y
-                pyxel.rect(draw_x, draw_y, CELL_SIZE, CELL_SIZE, 11) 
+                pyxel.rect(draw_x, draw_y, CELL_SIZE, CELL_SIZE, colors['player']) 
 
             # Disegna i nemici
             for e in self.enemies:
@@ -585,13 +586,13 @@ class App:
                     draw_x = e.px_x + e.draw_offset_x
                     draw_y = e.px_y + e.draw_offset_y
                     if e.type == "brandom":
-                        pyxel.rect(draw_x, draw_y, CELL_SIZE, CELL_SIZE, 14) # Viola
+                        pyxel.rect(draw_x, draw_y, CELL_SIZE, CELL_SIZE, colors['enemy_group1']) 
                     elif e.type == "fleeby":
-                        pyxel.rect(draw_x, draw_y, CELL_SIZE, CELL_SIZE, 15) # Rosa/Bianco
+                        pyxel.rect(draw_x, draw_y, CELL_SIZE, CELL_SIZE, colors['enemy_group1']) 
                     elif e.type == "chase":
-                        pyxel.rect(draw_x, draw_y, CELL_SIZE, CELL_SIZE, 8)  # Rosso scuro
+                        pyxel.rect(draw_x, draw_y, CELL_SIZE, CELL_SIZE, colors['enemy_group2']) 
                     elif e.type == "hasami":
-                        pyxel.rect(draw_x, draw_y, CELL_SIZE, CELL_SIZE, 4)  # Marrone/Verdone
+                        pyxel.rect(draw_x, draw_y, CELL_SIZE, CELL_SIZE, colors['enemy_group2']) 
 
             # UI: Livello e Percentuale di conquista (accorpati per non sovrapporsi)
             current_display_lvl = self.level_manager.current_level - 1
