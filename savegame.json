@@ -1,0 +1,39 @@
+{
+    "version": 1.0,
+    "profile": {
+        "unlocked_player": [
+            true,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false
+        ],
+        "unlocked_game": [
+            true,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false
+        ],
+        "unlocked_enemy": [
+            true,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false
+        ]
+    },
+    "current_run": {
+        "level": 1,
+        "is_active": true
+    }
+}

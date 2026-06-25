@@ -1,5 +1,8 @@
+import os
+
 import pyxel
 import random
+import json
 
 # Costanti della griglia
 GRID_W, GRID_H = 32, 32
@@ -16,6 +19,9 @@ STATE_MAIN_MENU = 0
 STATE_PLAY_MENU = 1
 STATE_OPTIONS_MENU = 2
 STATE_PLAYING = 3
+STATE_PAUSED = 4
+
+SAVE_FILE = "savegame.json"
 
 class Player:
     def __init__(self, x, y):
@@ -392,7 +398,7 @@ class App:
         
         # Inizializza i gestori
         self.options = OptionsManager()
-        self.menu = MenuManager(self.options)
+        self.menu = MenuManager(self.options, self)
 
         # Il gioco non parte subito, inizia dal menu
         self.game_started = False 
@@ -497,14 +503,22 @@ class App:
     def update(self):
         if self.menu.state == STATE_PLAYING:
             if not self.game_started:
-                self.start_new_game() # Il tuo metodo di setup iniziale
+                self.start_new_game() 
                 self.game_started = True
-                
+            
+            # --- Pausa Manuale (Tasto P o ESC) ---
+            if pyxel.btnp(pyxel.KEY_P) or pyxel.btnp(pyxel.KEY_ESCAPE):
+                self.menu.state = STATE_PAUSED
+                self.menu.return_state = STATE_PLAYING
+                return
+
             if self.game_over or self.game_won:
                 if pyxel.btnp(pyxel.KEY_R):
+                    self.end_run() # Salva profilo, cancella run
                     self.reset_game()
                 
                 if pyxel.btnp(pyxel.KEY_M) or pyxel.btnp(pyxel.KEY_ESCAPE):
+                    self.end_run() # Salva profilo, cancella run
                     self.menu.state = STATE_MAIN_MENU
                     self.game_started = False
                 return
@@ -521,8 +535,12 @@ class App:
                 e.update(self)
                 
             self.check_collisions()
+        elif self.menu.state == STATE_PAUSED:
+            # Il gioco è in pausa, aggiorna solo il menu
+            self.menu.update()
+            
         else:
-            # Se siamo in un menu, il gioco è in pausa
+            # Altri menu (Main, Options)
             self.game_started = False
             self.menu.update()
         
@@ -558,6 +576,9 @@ class App:
         
         # 4. Resetta la percentuale di conquista
         self.conquered = 0 
+        
+        self.menu.state = STATE_PAUSED
+        self.menu.return_state = STATE_PLAYING
     
     def draw(self):
         if self.menu.state == STATE_PLAYING:
@@ -616,6 +637,69 @@ class App:
         else:
             # Disegna i menu
             self.menu.draw()
+    
+    def save_game(self, save_run=True):
+        """Salva il profilo (palette) e opzionalmente la run corrente"""
+        # Struttura modulare e versionata per future espansioni
+        data = {
+            "version": 1.0, 
+            "profile": {
+                "unlocked_player": self.options.unlocked_player,
+                "unlocked_game": self.options.unlocked_game,
+                "unlocked_enemy": self.options.unlocked_enemy
+                # In futuro potrai aggiungere qui: "statistics": {...}, "settings": {...}
+            }
+        }
+        
+        if save_run and not self.game_over:
+            data["current_run"] = {
+                "level": self.level_manager.current_level - 1,
+                "is_active": True
+            }
+        else:
+            # Se il gioco è finito o non vogliamo salvare la run, la marchiamo come inattiva
+            data["current_run"] = {
+                "is_active": False
+            }
+            
+        with open(SAVE_FILE, 'w') as f:
+            json.dump(data, f, indent=4)
+
+    def load_game(self):
+        """Carica i dati. Ritorna True se c'è una run attiva da continuare"""
+        if os.path.exists(SAVE_FILE):
+            with open(SAVE_FILE, 'r') as f:
+                data = json.load(f)
+            
+            # 1. Carica SEMPRE il profilo (palette sbloccate), usando .get() per sicurezza
+            if "profile" in data:
+                profile = data["profile"]
+                self.options.unlocked_player = profile.get("unlocked_player", self.options.unlocked_player)
+                self.options.unlocked_game = profile.get("unlocked_game", self.options.unlocked_game)
+                self.options.unlocked_enemy = profile.get("unlocked_enemy", self.options.unlocked_enemy)
+            
+            # 2. Controlla se c'è una run attiva da continuare
+            if "current_run" in data and data["current_run"].get("is_active", False):
+                self.reset_game() # Resetta griglia e nemici
+                self.level_manager.current_level = data["current_run"]["level"]
+                self.enemies = self.level_manager.generate_wave(self.grid, GRID_W, GRID_H)
+                return True # C'è una partita da continuare
+                
+            return False # Non c'è nessuna partita attiva
+        return False
+
+    def has_active_run(self):
+        """Controlla se esiste un salvataggio con una run attiva (per il tasto Continua)"""
+        if os.path.exists(SAVE_FILE):
+            with open(SAVE_FILE, 'r') as f:
+                data = json.load(f)
+            return data.get("current_run", {}).get("is_active", False)
+        return False
+
+    def end_run(self):
+        """Chiama questo metodo quando si muore o si fa Game Over. 
+        Mantiene il profilo (palette) ma disattiva la run corrente."""
+        self.save_game(save_run=False)
 
 # Interfaccia principale 
 
@@ -731,14 +815,21 @@ class OptionsManager:
             self.unlocked_enemy[i] = True
 
 class MenuManager:
-    def __init__(self, options):
+    def __init__(self, options, app):
         self.options = options
+        self.app = app
         self.state = STATE_MAIN_MENU
         
         # Indici di selezione per i menu
         self.main_sel = 0
         self.play_sel = 0
         self.opt_sel = 0
+        
+        self.main_sel = 0
+        self.play_sel = 0
+        self.opt_sel = 0
+        self.pause_sel = 0      
+        self.return_state = STATE_MAIN_MENU
         
         # Definizione voci menu opzioni
         self.opt_items = [
@@ -765,6 +856,10 @@ class MenuManager:
         if self.state == STATE_OPTIONS_MENU:
             if pyxel.btnp(pyxel.KEY_LEFT): self._adjust_value(-1)
             if pyxel.btnp(pyxel.KEY_RIGHT): self._adjust_value(1)
+        
+        if self.state == STATE_PAUSED:
+            if pyxel.btnp(pyxel.KEY_ESCAPE):
+                self._go_back()
 
     def _change_selection(self, direction):
         if self.state == STATE_MAIN_MENU:
@@ -773,6 +868,8 @@ class MenuManager:
             self.play_sel = (self.play_sel + direction) % 2
         elif self.state == STATE_OPTIONS_MENU:
             self.opt_sel = (self.opt_sel + direction) % len(self.opt_items)
+        elif self.state == STATE_PAUSED:
+            self.pause_sel = (self.pause_sel + direction) % 3
 
     def _confirm(self):
         if self.state == STATE_MAIN_MENU:
@@ -781,22 +878,39 @@ class MenuManager:
             elif self.main_sel == 2: pyxel.quit()
             
         elif self.state == STATE_PLAY_MENU:
-            if self.play_sel == 0: 
+            if self.play_sel == 0: # NUOVA PARTITA
+                self.app.end_run() # Disattiva la run corrente ma mantiene le palette!
+                self.app.reset_game()
                 self.state = STATE_PLAYING
-                # Qui dovrai chiamare il metodo per inizializzare una nuova partita
-            # play_sel == 1 è "Continua" ed è disabilitato, quindi non fa nulla
+                self.app.game_started = True
+            elif self.play_sel == 1 and self.app.has_active_run(): # CONTINUA
+                if self.app.load_game():
+                    self.app.game_started = True
+                    self.state = STATE_PAUSED
+                    self.return_state = STATE_PLAYING
             
         elif self.state == STATE_OPTIONS_MENU:
             item = self.opt_items[self.opt_sel]
             if item["type"] == "action": # INDIETRO
                 self.state = STATE_MAIN_MENU
+        
+        elif self.state == STATE_PAUSED:
+            if self.pause_sel == 0: # RIPRENDI
+                self.state = self.return_state
+            elif self.pause_sel == 1: # OPZIONI
+                self.return_state = STATE_PAUSED # Così tornando dalle opzioni si torna in pausa
+                self.state = STATE_OPTIONS_MENU
+            elif self.pause_sel == 2: # SALVA E TORNA AL MENU
+                self.app.save_game()
+                self.state = STATE_MAIN_MENU
+                self.app.game_started = False
 
     def _go_back(self):
         if self.state == STATE_PLAY_MENU: self.state = STATE_MAIN_MENU
-        elif self.state == STATE_OPTIONS_MENU: self.state = STATE_MAIN_MENU
-        elif self.state == STATE_PLAYING: 
-            # Pausa o torna al menu? Per ora torniamo al menu principale
-            self.state = STATE_MAIN_MENU 
+        elif self.state == STATE_OPTIONS_MENU: 
+            self.state = self.return_state # Torna a PAUSA o MAIN a seconda da dove vieni
+        elif self.state == STATE_PAUSED:
+            self.state = self.return_state # ESC in pausa = Riprendi
 
     def _adjust_value(self, direction):
         item = self.opt_items[self.opt_sel]
@@ -827,6 +941,7 @@ class MenuManager:
         if self.state == STATE_MAIN_MENU: self._draw_main()
         elif self.state == STATE_PLAY_MENU: self._draw_play()
         elif self.state == STATE_OPTIONS_MENU: self._draw_options()
+        elif self.state == STATE_PAUSED: self._draw_pause()
 
     def _draw_main(self):
         pyxel.cls(0)
@@ -840,13 +955,36 @@ class MenuManager:
     def _draw_play(self):
         pyxel.cls(0)
         pyxel.text(100, 40, "GIOCA", 7)
+        
+        # Usa il nuovo metodo per controllare se c'è una partita in sospeso
+        has_run = self.app.has_active_run() 
         items = ["NUOVA PARTITA", "CONTINUA"]
+        
         for i, text in enumerate(items):
-            # "Continua" è disabilitato (colore 5 e non selezionabile visivamente in modo attivo)
-            col = 7 if i == self.play_sel else 5
-            if i == 1: col = 5 # Sempre grigio per disabilitato
+            # "Continua" è selezionabile solo se c'è una run attiva
+            if i == 1 and not has_run:
+                col = 5 
+            else:
+                col = 7 if i == self.play_sel else 5
+                
             pyxel.text(90, 80 + i * 20, text, col)
-            if i == self.play_sel and i == 0: pyxel.text(80, 80 + i * 20, ">", 7)
+            if i == self.play_sel and (i == 0 or has_run): 
+                pyxel.text(80, 80 + i * 20, ">", 7)
+
+    def _draw_pause(self):
+        # Sfondo leggermente oscurato o normale, ma bloccato
+        pyxel.cls(0)
+        
+        # Mostra il livello corrente per orientare il giocatore
+        current_lvl = self.app.level_manager.current_level - 1
+        pyxel.text(95, 30, f"PAUSA - LEVEL {current_lvl}", 7)
+        pyxel.text(70, 50, "Osserva i nuovi colori!", 10)
+        
+        items = ["RIPRENDI", "OPZIONI", "SALVA E ESCI"]
+        for i, text in enumerate(items):
+            col = 7 if i == self.pause_sel else 5
+            pyxel.text(100, 100 + i * 20, text, col)
+            if i == self.pause_sel: pyxel.text(90, 100 + i * 20, ">", 7)
 
     def _draw_options(self):
         pyxel.cls(0)
