@@ -310,6 +310,13 @@ class CutterEnemy(BaseEnemy):
         
         return random.choice(moves)
 
+ENEMY_CLASSES = {
+    "brandom": RandomEnemy,
+    "fleeby": FleeEnemy,
+    "chase": ChaserEnemy,
+    "hasami": CutterEnemy
+}
+
 class LevelManager:
     def __init__(self):
         self.current_level = 1
@@ -638,55 +645,137 @@ class App:
             # Disegna i menu
             self.menu.draw()
     
-    def save_game(self, save_run=True):
-        """Salva il profilo (palette) e opzionalmente la run corrente"""
-        # Struttura modulare e versionata per future espansioni
+    def save_game(self):
+        """Salva lo stato profondo del gioco e le impostazioni permanenti"""
         data = {
-            "version": 1.0, 
+            "version": 0.122, # Versione del formato per future espansioni
             "profile": {
                 "unlocked_player": self.options.unlocked_player,
                 "unlocked_game": self.options.unlocked_game,
-                "unlocked_enemy": self.options.unlocked_enemy
-                # In futuro potrai aggiungere qui: "statistics": {...}, "settings": {...}
+                "unlocked_enemy": self.options.unlocked_enemy,
+                "settings": {
+                    "volume": self.options.volume,
+                    "skin_index": self.options.skin_index,
+                    "sel_player_pal": self.options.sel_player_pal,
+                    "sel_game_pal": self.options.sel_game_pal,
+                    "sel_enemy_pal": self.options.sel_enemy_pal
+                }
+            },
+            "current_run": {
+                "is_active": True,
+                "level": self.level_manager.current_level,
+                "total_score": self.level_manager.total_score,
+                "conquered": self.conquered,
+                "grid": self.grid,
+                "player": {
+                    "x": self.player.x, "y": self.player.y,
+                    "px_x": self.player.px_x, "px_y": self.player.px_y,
+                    "is_outside": self.player.is_outside,
+                    "trail": self.player.trail,
+                    "facing": self.player.facing,
+                    "is_moving": self.player.is_moving,
+                    "move_timer": self.player.move_timer,
+                    "prev_x": self.player.prev_x, "prev_y": self.player.prev_y,
+                    "target_x": self.player.target_x, "target_y": self.player.target_y
+                },
+                "enemies": []
             }
         }
-        
-        if save_run and not self.game_over:
-            data["current_run"] = {
-                "level": self.level_manager.current_level - 1,
-                "is_active": True
-            }
-        else:
-            # Se il gioco è finito o non vogliamo salvare la run, la marchiamo come inattiva
-            data["current_run"] = {
-                "is_active": False
-            }
-            
+
+        # Salva lo stato di ogni nemico
+        for e in self.enemies:
+            data["current_run"]["enemies"].append({
+                "type": e.type,
+                "x": e.x, "y": e.y,
+                "px_x": e.px_x, "px_y": e.px_y,
+                "alive": e.alive,
+                "facing": e.facing,
+                "is_moving": e.is_moving,
+                "move_timer": e.move_timer,
+                "move_delay": e.move_delay,
+                "prev_x": e.prev_x, "prev_y": e.prev_y,
+                "target_x": e.target_x, "target_y": e.target_y
+            })
+
         with open(SAVE_FILE, 'w') as f:
             json.dump(data, f, indent=4)
 
     def load_game(self):
-        """Carica i dati. Ritorna True se c'è una run attiva da continuare"""
-        if os.path.exists(SAVE_FILE):
-            with open(SAVE_FILE, 'r') as f:
-                data = json.load(f)
+        """Carica lo stato profondo e ricostruisce esattamente la partita"""
+        if not os.path.exists(SAVE_FILE):
+            return False
             
-            # 1. Carica SEMPRE il profilo (palette sbloccate), usando .get() per sicurezza
-            if "profile" in data:
-                profile = data["profile"]
-                self.options.unlocked_player = profile.get("unlocked_player", self.options.unlocked_player)
-                self.options.unlocked_game = profile.get("unlocked_game", self.options.unlocked_game)
-                self.options.unlocked_enemy = profile.get("unlocked_enemy", self.options.unlocked_enemy)
+        with open(SAVE_FILE, 'r') as f:
+            data = json.load(f)
             
-            # 2. Controlla se c'è una run attiva da continuare
-            if "current_run" in data and data["current_run"].get("is_active", False):
-                self.reset_game() # Resetta griglia e nemici
-                self.level_manager.current_level = data["current_run"]["level"]
-                self.enemies = self.level_manager.generate_wave(self.grid, GRID_W, GRID_H)
-                return True # C'è una partita da continuare
-                
-            return False # Non c'è nessuna partita attiva
-        return False
+        # 1. Carica Profilo e Impostazioni (Permanent)
+        profile = data.get("profile", {})
+        self.options.unlocked_player = profile.get("unlocked_player", self.options.unlocked_player)
+        self.options.unlocked_game = profile.get("unlocked_game", self.options.unlocked_game)
+        self.options.unlocked_enemy = profile.get("unlocked_enemy", self.options.unlocked_enemy)
+        
+        settings = profile.get("settings", {})
+        self.options.volume = settings.get("volume", 5)
+        self.options.skin_index = settings.get("skin_index", 0)
+        self.options.sel_player_pal = settings.get("sel_player_pal", 0)
+        self.options.sel_game_pal = settings.get("sel_game_pal", 0)
+        self.options.sel_enemy_pal = settings.get("sel_enemy_pal", 0)
+
+        # 2. Controlla se c'è una run attiva
+        run = data.get("current_run", {})
+        if not run.get("is_active", False):
+            return False
+
+        # 3. Ricostruisci lo Stato del Gioco (Transient)
+        self.grid = run.get("grid", [[EMPTY for _ in range(GRID_W)] for _ in range(GRID_H)])
+        self.conquered = run.get("conquered", 0)
+        
+        self.level_manager.current_level = run.get("level", 1)
+        self.level_manager.total_score = run.get("total_score", 0)
+
+        # Ricostruisci Player
+        p_data = run.get("player", {})
+        self.player = Player(p_data.get("x", GRID_W//2), p_data.get("y", 0))
+        self.player.px_x = p_data.get("px_x", self.player.px_x)
+        self.player.px_y = p_data.get("px_y", self.player.px_y)
+        self.player.is_outside = p_data.get("is_outside", False)
+        
+        # ATTENZIONE: JSON salva le tuple come liste. Dobbiamo riconvertirle in tuple!
+        self.player.trail = [tuple(p) for p in p_data.get("trail", [])]
+        
+        self.player.facing = p_data.get("facing", 'DOWN')
+        self.player.is_moving = p_data.get("is_moving", False)
+        self.player.move_timer = p_data.get("move_timer", 0)
+        self.player.prev_x = p_data.get("prev_x", self.player.x)
+        self.player.prev_y = p_data.get("prev_y", self.player.y)
+        self.player.target_x = p_data.get("target_x", self.player.x)
+        self.player.target_y = p_data.get("target_y", self.player.y)
+
+        # Ricostruisci Nemici
+        self.enemies = []
+        for e_data in run.get("enemies", []):
+            e_type = e_data.get("type", "brandom")
+            e_class = ENEMY_CLASSES.get(e_type, RandomEnemy)
+            
+            # Istanza il nemico
+            e = e_class(e_data.get("x", 0), e_data.get("y", 0), speed_delay=e_data.get("move_delay", 6))
+            e.px_x = e_data.get("px_x", e.px_x)
+            e.px_y = e_data.get("px_y", e.px_y)
+            e.alive = e_data.get("alive", True)
+            e.facing = e_data.get("facing", 'DOWN')
+            e.is_moving = e_data.get("is_moving", False)
+            e.move_timer = e_data.get("move_timer", 0)
+            e.prev_x = e_data.get("prev_x", e.x)
+            e.prev_y = e_data.get("prev_y", e.y)
+            e.target_x = e_data.get("target_x", e.x)
+            e.target_y = e_data.get("target_y", e.y)
+            self.enemies.append(e)
+
+        self.game_over = False
+        self.game_won = False
+        self.level_transition_timer = 0 
+        
+        return True
 
     def has_active_run(self):
         """Controlla se esiste un salvataggio con una run attiva (per il tasto Continua)"""
@@ -697,9 +786,17 @@ class App:
         return False
 
     def end_run(self):
-        """Chiama questo metodo quando si muore o si fa Game Over. 
-        Mantiene il profilo (palette) ma disattiva la run corrente."""
-        self.save_game(save_run=False)
+        """Chiama questo metodo quando si muore. Mantiene il profilo ma disattiva la run."""
+        if os.path.exists(SAVE_FILE):
+            with open(SAVE_FILE, 'r') as f:
+                data = json.load(f)
+        else:
+            data = {"version": 1.1, "profile": {}, "current_run": {}}
+            
+        data["current_run"]["is_active"] = False
+        
+        with open(SAVE_FILE, 'w') as f:
+            json.dump(data, f, indent=4)
 
 # Interfaccia principale 
 
@@ -879,13 +976,14 @@ class MenuManager:
             
         elif self.state == STATE_PLAY_MENU:
             if self.play_sel == 0: # NUOVA PARTITA
-                self.app.end_run() # Disattiva la run corrente ma mantiene le palette!
+                self.app.end_run() # Pulisce la run vecchia ma mantiene le palette sbloccate!
                 self.app.reset_game()
                 self.state = STATE_PLAYING
                 self.app.game_started = True
             elif self.play_sel == 1 and self.app.has_active_run(): # CONTINUA
                 if self.app.load_game():
                     self.app.game_started = True
+                    # Mettiamo in pausa all'inizio così il giocatore vede i colori caricati
                     self.state = STATE_PAUSED
                     self.return_state = STATE_PLAYING
             
