@@ -384,12 +384,13 @@ class App:
         pyxel.init(256, 256, title="Qix Clone - Conquista il Territorio")
         
         pyxel.load("res.pyxres")
-        pyxel.playm(1, loop=True)
+        
+        self.music_playing = False 
 
         # 0: Nero, 1: Blu (Muri), 2: Rosso (Scia), 3: Verde (Player), 4: Viola (Nemici), 5: Bianco (Vuoto)
         self.grid = [[EMPTY for _ in range(GRID_W)] for _ in range(GRID_H)]
         self.setup_borders()
-        
+                
         self.player = Player(GRID_W // 2, 0)
         
         # INIZIALIZZAZIONI CORRETTE QUI:
@@ -410,6 +411,8 @@ class App:
         # Il gioco non parte subito, inizia dal menu
         self.game_started = False 
         
+        self.update_audio_state() 
+        
         pyxel.run(self.update, self.draw)
 
     def setup_borders(self):
@@ -419,6 +422,17 @@ class App:
         for y in range(GRID_H):
             self.grid[y][0] = WALL
             self.grid[y][GRID_W-1] = WALL
+
+    def update_audio_state(self):
+        """Gestisce l'accensione/spegnimento della musica di sottofondo"""
+        if self.options.music_on:
+            if not self.music_playing:
+                pyxel.playm(1, loop=True) # 1 è il numero della tua musica in res.pyxres
+                self.music_playing = True
+        else:
+            if self.music_playing:
+                pyxel.stop() # Ferma tutti i canali audio
+                self.music_playing = False
 
     def calculate_conquered(self):
         walls = sum(row.count(WALL) for row in self.grid)
@@ -654,7 +668,7 @@ class App:
                 "unlocked_game": self.options.unlocked_game,
                 "unlocked_enemy": self.options.unlocked_enemy,
                 "settings": {
-                    "volume": self.options.volume,
+                    "music_on": self.options.music_on,
                     "skin_index": self.options.skin_index,
                     "sel_player_pal": self.options.sel_player_pal,
                     "sel_game_pal": self.options.sel_game_pal,
@@ -715,7 +729,7 @@ class App:
         self.options.unlocked_enemy = profile.get("unlocked_enemy", self.options.unlocked_enemy)
         
         settings = profile.get("settings", {})
-        self.options.volume = settings.get("volume", 5)
+        self.options.music_on = settings.get("music_on", True)
         self.options.skin_index = settings.get("skin_index", 0)
         self.options.sel_player_pal = settings.get("sel_player_pal", 0)
         self.options.sel_game_pal = settings.get("sel_game_pal", 0)
@@ -775,6 +789,8 @@ class App:
         self.game_won = False
         self.level_transition_timer = 0 
         
+        self.update_audio_state()
+        
         return True
 
     def has_active_run(self):
@@ -803,7 +819,7 @@ class App:
 class OptionsManager:
     def __init__(self):
         # --- IMPOSTAZIONI GENERALI ---
-        self.volume = 5  # Da 0 a 7 (standard Pyxel) o 0-100
+        self.music_on = True 
         self.skin_index = 0
         self.max_skins = 1  # Diventerà 2 quando aggiungerai gli sprite
 
@@ -930,7 +946,7 @@ class MenuManager:
         
         # Definizione voci menu opzioni
         self.opt_items = [
-            {"name": "VOLUME", "type": "slider"},
+            {"name": "MUSICA", "type": "toggle"},
             {"name": "SKIN", "type": "selector"},
             {"name": "PALETTE PLAYER", "type": "palette", "target": "player"},
             {"name": "PALETTE MONDO", "type": "palette", "target": "game"},
@@ -1013,8 +1029,9 @@ class MenuManager:
     def _adjust_value(self, direction):
         item = self.opt_items[self.opt_sel]
         
-        if item["type"] == "slider":
-            self.options.volume = max(0, min(7, self.options.volume + direction))
+        if item["type"] == "toggle":
+            self.options.music_on = not self.options.music_on
+            self.app.update_audio_state()
             
         elif item["type"] == "selector":
             self.options.skin_index = (self.options.skin_index + direction) % self.options.max_skins
@@ -1096,7 +1113,10 @@ class MenuManager:
 
             # Disegna i controlli a destra
             val_x = 150
-            if item["type"] == "slider":
+            if item["type"] == "toggle":
+                status = "ON " if self.options.music_on else "OFF"
+                pyxel.text(val_x, y, f"[ {status} ]", 7)
+            elif item["type"] == "slider":
                 pyxel.text(val_x, y, f"< {self.options.volume} >", 7)
             elif item["type"] == "selector":
                 pyxel.text(val_x, y, f"< SKIN {self.options.skin_index+1} >", 7)
