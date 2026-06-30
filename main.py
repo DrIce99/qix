@@ -406,6 +406,7 @@ class App:
         
         # Inizializza i gestori
         self.options = OptionsManager()
+        self.load_profile()
         self.menu = MenuManager(self.options, self)
 
         # Il gioco non parte subito, inizia dal menu
@@ -577,6 +578,7 @@ class App:
         self.game_won = False
         self.conquered = 0
         self.options.reset_unlocks() 
+        self.save_profile()
 
     def next_level(self):
         # 1. Resetta la griglia (lasciando solo i bordi)
@@ -594,6 +596,8 @@ class App:
         
         display_lvl = self.level_manager.current_level - 1 
         self.options.update_unlocks(display_lvl)
+        
+        self.save_profile()
         
         # 4. Resetta la percentuale di conquista
         self.conquered = 0 
@@ -662,7 +666,7 @@ class App:
     def save_game(self):
         """Salva lo stato profondo del gioco e le impostazioni permanenti"""
         data = {
-            "version": 0.122, # Versione del formato per future espansioni
+            "version": 0.123, # Versione del formato per future espansioni
             "profile": {
                 "unlocked_player": self.options.unlocked_player,
                 "unlocked_game": self.options.unlocked_game,
@@ -719,21 +723,14 @@ class App:
         if not os.path.exists(SAVE_FILE):
             return False
             
-        with open(SAVE_FILE, 'r') as f:
-            data = json.load(f)
+        try:
+            with open(SAVE_FILE, 'r') as f:
+                data = json.load(f)
+        except (json.JSONDecodeError, IOError):
+            return False
             
         # 1. Carica Profilo e Impostazioni (Permanent)
-        profile = data.get("profile", {})
-        self.options.unlocked_player = profile.get("unlocked_player", self.options.unlocked_player)
-        self.options.unlocked_game = profile.get("unlocked_game", self.options.unlocked_game)
-        self.options.unlocked_enemy = profile.get("unlocked_enemy", self.options.unlocked_enemy)
-        
-        settings = profile.get("settings", {})
-        self.options.music_on = settings.get("music_on", True)
-        self.options.skin_index = settings.get("skin_index", 0)
-        self.options.sel_player_pal = settings.get("sel_player_pal", 0)
-        self.options.sel_game_pal = settings.get("sel_game_pal", 0)
-        self.options.sel_enemy_pal = settings.get("sel_enemy_pal", 0)
+        self.load_profile() 
 
         # 2. Controlla se c'è una run attiva
         run = data.get("current_run", {})
@@ -792,6 +789,61 @@ class App:
         self.update_audio_state()
         
         return True
+    
+    def save_profile(self):
+        """Salva solo impostazioni e sblocchi, mantenendo intatta la run corrente"""
+        # 1. Leggi il file esistente per non perdere i dati della partita in corso
+        if os.path.exists(SAVE_FILE):
+            with open(SAVE_FILE, 'r') as f:
+                data = json.load(f)
+        else:
+            data = {"version": 0.122, "profile": {}, "current_run": {}}
+
+        # 2. Aggiorna SOLO la sezione profile
+        data["profile"] = {
+            "unlocked_player": self.options.unlocked_player,
+            "unlocked_game": self.options.unlocked_game,
+            "unlocked_enemy": self.options.unlocked_enemy,
+            "settings": {
+                "music_on": self.options.music_on,
+                "skin_index": self.options.skin_index,
+                "sel_player_pal": self.options.sel_player_pal,
+                "sel_game_pal": self.options.sel_game_pal,
+                "sel_enemy_pal": self.options.sel_enemy_pal
+            }
+        }
+        
+        # 3. Riscrivi il file
+        with open(SAVE_FILE, 'w') as f:
+            json.dump(data, f, indent=4)
+
+    def load_profile(self):
+        """Carica le impostazioni permanenti (profilo) all'avvio del gioco"""
+        if os.path.exists(SAVE_FILE):
+            try:
+                with open(SAVE_FILE, 'r') as f:
+                    data = json.load(f)
+                
+                # Carica il profilo se esiste nel file
+                if "profile" in data:
+                    profile = data["profile"]
+                    
+                    # 1. Sblocchi delle palette
+                    self.options.unlocked_player = profile.get("unlocked_player", self.options.unlocked_player)
+                    self.options.unlocked_game = profile.get("unlocked_game", self.options.unlocked_game)
+                    self.options.unlocked_enemy = profile.get("unlocked_enemy", self.options.unlocked_enemy)
+                    
+                    # 2. Impostazioni utente (Musica, Skin, Palette selezionate)
+                    settings = profile.get("settings", {})
+                    self.options.music_on = settings.get("music_on", True)
+                    self.options.skin_index = settings.get("skin_index", 0)
+                    self.options.sel_player_pal = settings.get("sel_player_pal", 0)
+                    self.options.sel_game_pal = settings.get("sel_game_pal", 0)
+                    self.options.sel_enemy_pal = settings.get("sel_enemy_pal", 0)
+                    
+            except (json.JSONDecodeError, IOError):
+                # Se il file JSON è corrotto o illeggibile, ignora l'errore e mantieni i default
+                print("Attenzione: file di salvataggio corrotto, caricamento impostazioni di default.")
 
     def has_active_run(self):
         """Controlla se esiste un salvataggio con una run attiva (per il tasto Continua)"""
@@ -978,7 +1030,18 @@ class MenuManager:
         if self.state == STATE_MAIN_MENU:
             self.main_sel = (self.main_sel + direction) % 3
         elif self.state == STATE_PLAY_MENU:
-            self.play_sel = (self.play_sel + direction) % 2
+            has_run = self.app.has_active_run()
+            if has_run:
+                # Se c'è un salvataggio, naviga normalmente su tutte e 3 le voci
+                self.play_sel = (self.play_sel + direction) % 3
+            else:
+                # Se NON c'è un salvataggio, salta l'indice 1 (CONTINUA)
+                if self.play_sel == 0:
+                    self.play_sel = 2 # Da Nuova Partita -> Indietro
+                elif self.play_sel == 2:
+                    self.play_sel = 0 # Da Indietro -> Nuova Partita
+                else:
+                    self.play_sel = 0 # Fallback di sicurezza
         elif self.state == STATE_OPTIONS_MENU:
             self.opt_sel = (self.opt_sel + direction) % len(self.opt_items)
         elif self.state == STATE_PAUSED:
@@ -1002,6 +1065,8 @@ class MenuManager:
                     # Mettiamo in pausa all'inizio così il giocatore vede i colori caricati
                     self.state = STATE_PAUSED
                     self.return_state = STATE_PLAYING
+            elif self.play_sel == 2:
+                self.state = STATE_MAIN_MENU
             
         elif self.state == STATE_OPTIONS_MENU:
             item = self.opt_items[self.opt_sel]
@@ -1028,13 +1093,16 @@ class MenuManager:
 
     def _adjust_value(self, direction):
         item = self.opt_items[self.opt_sel]
+        is_changed = False # Flag per tracciare se c'è stato un cambiamento reale
         
         if item["type"] == "toggle":
             self.options.music_on = not self.options.music_on
             self.app.update_audio_state()
+            is_changed = True
             
         elif item["type"] == "selector":
             self.options.skin_index = (self.options.skin_index + direction) % self.options.max_skins
+            is_changed = True
             
         elif item["type"] == "palette":
             target = item["target"]
@@ -1045,12 +1113,15 @@ class MenuManager:
             current_idx = getattr(self.options, sel)
             new_idx = (current_idx + direction) % len(pals)
             
-            # Controlla se è sbloccato
             if not unl[new_idx]: return 
             
-            # Controlla la logica anti-mimesi
             if self.options.can_select_palette(target, new_idx):
                 setattr(self.options, sel, new_idx)
+                is_changed = True
+
+        # Se il valore è cambiato, salva immediatamente il profilo su disco
+        if is_changed:
+            self.app.save_profile()
 
     def draw(self):
         if self.state == STATE_MAIN_MENU: self._draw_main()
@@ -1073,17 +1144,20 @@ class MenuManager:
         
         # Usa il nuovo metodo per controllare se c'è una partita in sospeso
         has_run = self.app.has_active_run() 
-        items = ["NUOVA PARTITA", "CONTINUA"]
+        items = ["NUOVA PARTITA", "CONTINUA", "INDIETRO"]
         
         for i, text in enumerate(items):
-            # "Continua" è selezionabile solo se c'è una run attiva
+            # 1. Determina il colore del testo
             if i == 1 and not has_run:
-                col = 5 
+                col = 13 # "Continua" disabilitato (grigio)
             else:
-                col = 7 if i == self.play_sel else 5
+                col = 7 if i == self.play_sel else 5 # Selezione attiva o inattiva
                 
             pyxel.text(90, 80 + i * 20, text, col)
-            if i == self.play_sel and (i == 0 or has_run): 
+            
+            # 2. Determina se mostrare la freccia ">"
+            is_disabled = (i == 1 and not has_run)
+            if i == self.play_sel and not is_disabled: 
                 pyxel.text(80, 80 + i * 20, ">", 7)
 
     def _draw_pause(self):
